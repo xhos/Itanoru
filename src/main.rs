@@ -12,6 +12,81 @@ use teloxide::{prelude::*, types::InputFile, types::InputSticker, utils::command
 
 const MAX_STICKER_SIZE: u32 = 512;
 
+#[tokio::main]
+async fn main() {
+    pretty_env_logger::init();
+    log::info!("Starting sticker bot...");
+
+    let bot = Bot::from_env();
+
+    Command::repl(bot, answer).await;
+}
+
+#[derive(BotCommands, Clone)]
+#[command(
+    rename_rule = "lowercase",
+    description = "These commands are supported:"
+)]
+enum Command {
+    #[command(description = "Displays this text")]
+    Help,
+    #[command(description = "Creates a sticker set from a URL to a Pinterest board")]
+    CreateSet(String),
+}
+
+async fn answer(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()> {
+    match cmd {
+        Command::Help => {
+            send_help_message(bot, msg).await?
+        }
+        Command::CreateSet(url) => {
+            handle_pinterest_sticker_set(&bot, &url).await?
+        }
+    };
+
+    Ok(())
+}
+
+async fn send_help_message(bot: Bot, msg: Message) -> ResponseResult<()> {
+    bot.send_message(msg.chat.id, Command::descriptions().to_string())
+        .await
+}
+
+async fn handle_pinterest_sticker_set(bot: &Bot, url: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    download_board(url)?;
+    let image_paths = get_image_paths(url)?;
+    create_sticker_set(bot, &url.to_string(), &image_paths).await?;
+    Ok(())
+}
+
+async fn create_sticker_set(bot: &Bot, url: &String, image_paths: &[String]) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let (username, boardname) = get_pinterest_info(url)?;
+    let bot_id = bot.get_me().await?.user.id;
+    let sticker_set_name = format!("{}_{}_by_{}", username, boardname, bot_id);
+
+    // Create a new sticker set
+    let sticker = InputSticker::Png(InputFile::file_id("")); // replace with a valid sticker
+    let emojis = get_random_emoji();
+
+    bot.create_new_sticker_set(bot_id, sticker_set_name.clone(), username.clone(), sticker, emojis.clone()).await?;
+
+    for path in image_paths {
+        let image = ImageReader::open(path)?.decode()?;
+        let resized = image.thumbnail(MAX_STICKER_SIZE, MAX_STICKER_SIZE);
+        let mut image_data = Cursor::new(Vec::new());
+        resized.write_to(&mut image_data, image::ImageOutputFormat::Png)?;
+        let input_file = InputFile::memory(image_data.into_inner());
+
+        let uploaded_file = bot.upload_sticker_file(bot_id, input_file).await?;
+        let input_sticker = InputSticker::Png(InputFile::file_id(uploaded_file.id));
+
+        bot.add_sticker_to_set(bot_id, sticker_set_name.clone(), input_sticker, emojis.clone()).await?;
+    }
+
+    Ok(())
+}
+
+// Returns the username and boardname from a Pinterest URL
 fn get_pinterest_info(url: &str) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
     let output = SystemCommand::new("./src/gallery-dl.exe")
         .arg("-j")
@@ -34,6 +109,7 @@ fn get_pinterest_info(url: &str) -> Result<(String, String), Box<dyn Error + Sen
     Ok((username, board_name))
 }
 
+// Downloads the Pinterest board using gallery-dl into gallery-dl/pinterest/username/boardname
 fn download_board(url: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let output = SystemCommand::new("./src/gallery-dl.exe")
         .arg(url)
@@ -46,6 +122,7 @@ fn download_board(url: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     Ok(())
 }
 
+// Returns a vector of image paths in the gallery-dl/pinterest/username/boardname directory
 fn get_image_paths(url: &str) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
     let (username, board_name) = get_pinterest_info(url)?;
 
@@ -68,87 +145,10 @@ fn get_image_paths(url: &str) -> Result<Vec<String>, Box<dyn Error + Send + Sync
     Ok(paths)
 }
 
-#[tokio::main]
-async fn main() {
-    pretty_env_logger::init();
-    log::info!("Starting sticker bot...");
-
-    let bot = Bot::from_env();
-
-    Command::repl(bot, answer).await;
-}
-
-#[derive(BotCommands, Clone)]
-#[command(
-    rename_rule = "lowercase",
-    description = "These commands are supported:"
-)]
-enum Command {
-    #[command(description = "display this text.")]
-    Help,
-    #[command(description = "create a sticker set from a Pinterest board")]
-    CreateStickerSetFromPinterest(String),
-}
-
-async fn answer(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()> {
-    match cmd {
-        Command::Help => {
-            bot.send_message(msg.chat.id, Command::descriptions().to_string())
-                .await?
-        }
-        Command::CreateStickerSetFromPinterest(url) => {
-            if let Err(e) = handle_pinterest_sticker_set(&bot, &url).await {
-                bot.send_message(msg.chat.id, format!("Error: {}", e))
-                    .await?
-            } else {
-                bot.send_message(msg.chat.id, "Sticker set created successfully!")
-                    .await?
-            }
-        }
-    };
-
-    Ok(())
-}
-
-async fn handle_pinterest_sticker_set(
-    bot: &Bot,
-    url: &str,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    download_board(url)?;
-    let image_paths = get_image_paths(url)?;
-    create_sticker_set(bot, &url.to_string(), &image_paths).await?;
-    Ok(())
-}
-
-async fn create_sticker_set(
-    bot: &Bot,
-    url: &String,
-    image_paths: &[String],
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let (username, boardname) = get_pinterest_info(url)?;
-    let user_id = bot.get_me().await?.user.id;
-    let sticker_set_name = format!("{}_{}_by_botusername", username, boardname); // replace 'botusername' with your bot's username
-
-    // Create a new sticker set
-    let sticker = InputSticker::Png(InputFile::file_id("")); // replace with a valid sticker
-    let emojis = get_random_emoji();
-
-    bot.create_new_sticker_set(user_id, sticker_set_name.clone(), username.clone(), sticker, emojis.clone()).await?;
-
-    for path in image_paths {
-        let image = ImageReader::open(path)?.decode()?;
-        let resized = image.thumbnail(MAX_STICKER_SIZE, MAX_STICKER_SIZE);
-        let mut image_data = Cursor::new(Vec::new());
-        resized.write_to(&mut image_data, image::ImageOutputFormat::Png)?;
-        let input_file = InputFile::memory(image_data.into_inner());
-
-        let uploaded_file = bot.upload_sticker_file(user_id, input_file).await?;
-        let input_sticker = InputSticker::Png(InputFile::file_id(uploaded_file.id));
-
-        bot.add_sticker_to_set(user_id, sticker_set_name.clone(), input_sticker, emojis.clone()).await?;
-    }
-
-    Ok(())
+fn get_random_emoji() -> String {
+    let emojis = ["😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "🙂", "🙃"];
+    let mut rng = rand::thread_rng();
+    emojis.choose(&mut rng).unwrap().to_string()
 }
 
 // async fn create_and_add_sticker(
@@ -184,8 +184,3 @@ async fn create_sticker_set(
 //     Ok(buffer.into_inner())
 // }
 
-fn get_random_emoji() -> String {
-    let emojis = ["😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "🙂", "🙃"];
-    let mut rng = rand::thread_rng();
-    emojis.choose(&mut rng).unwrap().to_string()
-}
