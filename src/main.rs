@@ -1,11 +1,12 @@
 use std::fs;
+use chrono::Utc;
 use std::path::Path;
 use serde_json::Value;
 use rand::seq::SliceRandom;
 use std::{error::Error, io::Cursor};
 use image::io::Reader as ImageReader;
 use std::process::Command as SystemCommand;
-use teloxide::{prelude::*, types::{InputFile, UserId, InputSticker, Message, ChatId, StickerSet},utils::command::BotCommands};
+use teloxide::{prelude::*, types::{InputFile, UserId, InputSticker, Message},utils::command::BotCommands};
 
 const MAX_STICKER_SIZE: u32 = 512;
 
@@ -28,15 +29,17 @@ enum Command {
     CreateSet(String),
 }
 
+// Handles the commands
 async fn answer(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()> {
     match cmd {
         Command::Help => {
-            send_help_message(bot, msg).await?
+            handle_help_command(bot, msg).await?
         }
         Command::CreateSet(url) => {
-            match handle_pinterest_sticker_set(&bot, msg.from().unwrap().id, &url).await {
+            match handle_create_set(&bot, msg.from().unwrap().id, &url).await {
                 Ok(_) => (),
                 Err(e) => {
+                    // TODO: Maybe don't send the error message to the user, but log it instead
                     log::error!("Failed to handle Pinterest sticker set: {}", e);
                     bot.send_message(msg.chat.id, format!("Failed to create sticker set: {}", e))
                         .await?;
@@ -44,17 +47,16 @@ async fn answer(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()> {
             }
         }
     };
-
     Ok(())
 }
 
-async fn send_help_message(bot: Bot, msg: Message) -> ResponseResult<()> {
+async fn handle_help_command(bot: Bot, msg: Message) -> ResponseResult<()> {
     bot.send_message(msg.chat.id, Command::descriptions().to_string())
         .await
-        .map(|_| ()) // yeah idk why I need this
+        .map(|_| ()) // yeah idk why i need this, i'll figure out later i guess
 }
 
-async fn handle_pinterest_sticker_set(bot: &Bot, user_id: UserId, url: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+async fn handle_create_set(bot: &Bot, user_id: UserId, url: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     // Download the Pinterest board
     download_board(url)?;
 
@@ -74,17 +76,9 @@ async fn handle_pinterest_sticker_set(bot: &Bot, user_id: UserId, url: &str) -> 
     Ok(())
 }
 
-async fn check_sticker_set_exists(bot: &Bot, name: &str) -> Result<bool, teloxide::errors::ApiError> {
-    match bot.get_sticker_set(name).await {
-        Ok(_) => Ok(true),  // Sticker set exists
-        Err(e) if e.kind() == ApiErrorKind::StickerSetNameInvalid => Ok(false),  // Sticker set doesn't exist
-        Err(e) => Err(e),  // Other errors
-    }
-}
-
 // TODO: Check if support for non-PNG images works
 // TODO: Add a size, format and dimensions check for the images
-async fn create_sticker(bot: &Bot, path: &str) -> Result<InputSticker, Box<dyn Error + Send + Sync>> {
+async fn create_sticker(bot: &Bot, path: &str, user_id: UserId) -> Result<InputSticker, Box<dyn Error + Send + Sync>> {
     if !Path::new(path).exists() {
         return Err("Sticker file not found".into());
     }
@@ -109,26 +103,17 @@ async fn create_sticker(bot: &Bot, path: &str) -> Result<InputSticker, Box<dyn E
     Ok(input_sticker)
 }
 
+
 async fn get_sticker_set_name(bot: &Bot, username: &str, boardname: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
     let botname = bot.get_me().await?.user.username.unwrap_or_default();
 
-    // Iterate over sticker set names until we find one that doesn't exist
-    let mut counter = 1;
-    loop {
-        let sticker_set_name = if counter > 1 {
-            format!("{}_{}_{}_by_{}", username, boardname, counter, botname)
-        } else {
-            format!("{}_{}_by_{}", username, boardname, botname)
-        };
-    
-        let exists = check_sticker_set_exists(bot, &sticker_set_name).await?;
-        if !exists {
-            println!("Sticker set `{}` does not exist, creating..", sticker_set_name);
-            return Ok(sticker_set_name);
-        }
-        println!("Sticker set `{}` exists already, incrementing..", sticker_set_name);
-        counter += 1;
-    }
+    // Get the current timestamp in milliseconds
+    let timestamp = Utc::now().timestamp_millis();
+
+    // Include the timestamp in the sticker set name
+    let sticker_set_name = format!("{}_{}_{}_by_{}", username, boardname, timestamp, botname);
+
+    Ok(sticker_set_name)
 }
 
 // TODO: Add an option to not include the user and board name in the sticker set name for privacy reasons
@@ -136,7 +121,7 @@ async fn create_sticker_set(bot: &Bot, user_id: UserId, sticker_set_name: &Strin
     // Create a vector of stickers
     let mut stickers = Vec::new();
     for path in image_paths {
-        let sticker = create_sticker(bot, path).await?;
+        let sticker = create_sticker(bot, path, user_id).await?;
         stickers.push(sticker);
     }
 
