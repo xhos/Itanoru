@@ -7,13 +7,16 @@ use std::{error::Error, io::Cursor};
 use image::io::Reader as ImageReader;
 use std::process::Command as SystemCommand;
 use teloxide::{prelude::*, types::{InputFile, UserId, InputSticker, Message},utils::command::BotCommands};
+use image::GenericImageView;
+use log::{trace, debug, info, warn, error};
+use urlencoding::decode;
 
 const MAX_STICKER_SIZE: u32 = 512;
 
 #[tokio::main]
 async fn main() {
     pretty_env_logger::init();
-    log::info!("Starting sticker bot...");
+    info!("Starting sticker bot...");
 
     let bot = Bot::from_env();
 
@@ -40,7 +43,7 @@ async fn answer(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()> {
                 Ok(_) => (),
                 Err(e) => {
                     // TODO: Maybe don't send the error message to the user, but log it instead
-                    log::error!("Failed to handle Pinterest sticker set: {}", e);
+                    error!("Failed to handle Pinterest sticker set: {}", e);
                     bot.send_message(msg.chat.id, format!("Failed to create sticker set: {}", e))
                         .await?;
                 }
@@ -83,13 +86,42 @@ async fn create_sticker(bot: &Bot, path: &str, user_id: UserId) -> Result<InputS
         return Err("Sticker file not found".into());
     }
 
+    // Get the file extension
+    let file_extension = Path::new(path)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("Unknown");
+
+    debug!("File extension: {}", file_extension);
+
+    // Get the file metadata
+    let metadata = fs::metadata(path)?;
+    let file_size_before = metadata.len();
+
+    // Get the image dimensions using imagesize
+    let dimensions_before = match imagesize::size(path) {
+        Ok(size) => size,
+        Err(e) => return Err(Box::new(e)),
+    };
+    debug!("Image dimensions before: {}x{}", dimensions_before.width, dimensions_before.height);
+
     // Open the image file
     let image = ImageReader::open(path)?.decode()?;
+
     let resized = image.resize_exact(MAX_STICKER_SIZE, MAX_STICKER_SIZE, image::imageops::FilterType::Nearest);
 
     // Convert the image to PNG and store it in a Cursor
     let mut image_data = Cursor::new(Vec::new());
     resized.write_to(&mut image_data, image::ImageOutputFormat::Png)?;
+
+    // Get the size and dimensions after converting
+    let file_size_after = image_data.get_ref().len() as u64;
+    let dimensions_after = resized.dimensions();
+    debug!("Image dimensions after: {}x{}", dimensions_after.0, dimensions_after.1);
+
+    // Log the file type, dimensions, and size before and after converting
+    debug!("File size before: {} bytes", file_size_before);
+    debug!("File size after: {} bytes", file_size_after);
 
     // Create an InputFile from the image data
     let input_file = InputFile::memory(image_data.into_inner());
@@ -158,6 +190,8 @@ fn get_pinterest_info(url: &str) -> Result<(String, String), Box<dyn Error + Sen
         .as_str()
         .ok_or("Invalid URL format")?;
 
+    let url = decode(url).expect("UTF-8");
+
     let parts: Vec<&str> = url.split('/').collect();
     let username = parts[1].to_string();
     let board_name = parts[2].to_string();
@@ -182,16 +216,16 @@ fn download_board(url: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
 fn get_image_paths(url: &str) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
     let (username, board_name) = get_pinterest_info(url)?;
 
-    let dir_path = format!("gallery-dl/pinterest/{}/{}", username, board_name);
-    let dir = Path::new(&dir_path);
+    let dir_path = Path::new("gallery-dl").join("pinterest").join(username).join(board_name);
+    debug!("Directory path: {}", dir_path.display()); // Print the directory path
 
-    if !dir.is_dir() {
-        return Err("Invalid directory path".into());
+    if !dir_path.is_dir() {
+        return Err(format!("Invalid directory path: {}", dir_path.display()).into()); // Include the directory path in the error message
     }
 
     let mut paths = Vec::new();
 
-    for entry in fs::read_dir(dir)? {
+    for entry in fs::read_dir(&dir_path)? {
         let entry = entry?;
         if entry.path().is_file() {
             paths.push(entry.path().to_string_lossy().into_owned());
