@@ -10,8 +10,11 @@ use image::{DynamicImage, GenericImageView, ImageError, ImageDecoder, imageops::
 use teloxide::{prelude::*, types::{InputFile, UserId, InputSticker, Message}, utils::command::BotCommands};
 use urlencoding::decode;
 use log::{trace, debug, info, warn, error};
-use image::png::PNGEncoder;
+use image::codecs::png::PngEncoder;
 use oxipng::Options;
+use image::ImageEncoder;
+use image::ColorType;
+use std::io::Cursor;
 
 const STICKER_SIZE: u32 = 512;
 
@@ -96,38 +99,50 @@ impl Img {
         Ok(Self { img, path })
     }
 
+
+    
     async fn encode_png(&self) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
-        let img = &self.img;
-        debug!("dim0: {}, dim1: {}", img.dimensions().0, img.dimensions().1);
+        let mut img = self.img.clone();
     
-        if img.dimensions().0 != STICKER_SIZE {
-            let resized = img.resize_exact(STICKER_SIZE, STICKER_SIZE, FilterType::Gaussian);
-    
-            return self.encode_png(&resized);
+        // Ensure the image is a square with dimensions STICKER_SIZE x STICKER_SIZE
+        if img.width() != STICKER_SIZE || img.height() != STICKER_SIZE {
+            img = img.resize_exact(STICKER_SIZE, STICKER_SIZE, FilterType::Gaussian);
         }
     
-        debug!("newdim0: {}, newdim1: {}", img.dimensions().0, img.dimensions().1);
+        let mut buffer = Cursor::new(Vec::new());
+        let encoder = PngEncoder::new(&mut buffer);
+        let img_data = img.to_rgba8().into_raw();
+        encoder.write_image(
+            &img_data, 
+            img.width(), 
+            img.height(), 
+            ColorType::Rgba8.into(),
+        )?;
     
-        let mut buffer = Vec::new();
-        let encoder = PNGEncoder::new(&mut buffer);
-    
-        match encoder.encode(&img.to_bytes(), img.dimensions().0, img.dimensions().1, img.color()) {
-            Ok(_) => Ok(buffer),
-            Err(err) => Err(Box::new(err))
-        }
+        Ok(buffer.into_inner())
     }
 }
+
 
 
 async fn create_sticker(bot: &Bot, path: &str, user_id: UserId) -> Result<InputSticker, Box<dyn Error + Send + Sync>> {
     debug!("Creating sticker from file: {}", path);
 
-    if !Path::new(path).exists() {
+    let path_obj = Path::new(path);
+    if !path_obj.exists() {
         return Err("Sticker file not found".into());
     }
 
+    // Check if the file size is greater than 512KB
+    let metadata = fs::metadata(&path_obj)?;
+    let file_size_kb = metadata.len() as f64 / 1024.0;
+    if file_size_kb > 512.0 {
+        return Err("Image size is greater than 512KB".into());
+    }
+
     let image = Img::new(path.to_string())?;
-    let optimized_data = oxipng::optimize_from_memory(&image.encode_png().await?)?;
+    let options = oxipng::Options::default();
+    let optimized_data = oxipng::optimize_from_memory(&image.encode_png().await?, &options)?;
     
     trace!("Optimized data size: {:.2} KB", optimized_data.len() as f64 / 1024.0);
 
@@ -162,8 +177,13 @@ async fn create_sticker_set(bot: &Bot, user_id: UserId, sticker_set_name: &Strin
     // Create a vector of stickers
     let mut stickers = Vec::new();
     for path in image_paths {
-        let sticker = create_sticker(bot, path, user_id).await?;
-        stickers.push(sticker);
+        match create_sticker(bot, path, user_id).await {
+            Ok(sticker) => stickers.push(sticker),
+            Err(e) => {
+                error!("Failed to create sticker from file {}: {}", path, e);
+                continue;
+            }
+        }
     }
 
     // Create a new sticker set
