@@ -1,17 +1,19 @@
 use std::fs;
-use chrono::Utc;
 use std::path::Path;
+use std::process::Command as SystemCommand;
+use std::error::Error;
+
+use chrono::Utc;
 use serde_json::Value;
 use rand::seq::SliceRandom;
-use std::{error::Error, io::Cursor};
-use image::io::Reader as ImageReader;
-use std::process::Command as SystemCommand;
-use teloxide::{prelude::*, types::{InputFile, UserId, InputSticker, Message},utils::command::BotCommands};
-use image::GenericImageView;
-use log::{trace, debug, info, warn, error};
+use image::{DynamicImage, GenericImageView, ImageError, ImageDecoder, imageops::FilterType, io::Reader as ImageReader};
+use teloxide::{prelude::*, types::{InputFile, UserId, InputSticker, Message}, utils::command::BotCommands};
 use urlencoding::decode;
+use log::{trace, debug, info, warn, error};
+use image::png::PNGEncoder;
+use oxipng::Options;
 
-const MAX_STICKER_SIZE: u32 = 512;
+const STICKER_SIZE: u32 = 512;
 
 #[tokio::main]
 async fn main() {
@@ -79,58 +81,59 @@ async fn handle_create_set(bot: &Bot, user_id: UserId, url: &str) -> Result<(), 
     Ok(())
 }
 
-// TODO: Check if support for non-PNG images works
-// TODO: Add a size, format and dimensions check for the images
+
+
+pub struct Img {
+    img : DynamicImage,
+    path: String,
+}
+
+impl Img {
+    fn new(path: String) -> Result<Self, ImageError> {
+        trace!("Opening image: {}", path);
+        trace!("Image size: {:.2} KB", fs::metadata(&path).unwrap().len() as f64 / 1024.0);
+        let img = ImageReader::open(&path)?.decode()?;
+        Ok(Self { img, path })
+    }
+
+    async fn encode_png(&self) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
+        let img = &self.img;
+        debug!("dim0: {}, dim1: {}", img.dimensions().0, img.dimensions().1);
+    
+        if img.dimensions().0 != STICKER_SIZE {
+            let resized = img.resize_exact(STICKER_SIZE, STICKER_SIZE, FilterType::Gaussian);
+    
+            return self.encode_png(&resized);
+        }
+    
+        debug!("newdim0: {}, newdim1: {}", img.dimensions().0, img.dimensions().1);
+    
+        let mut buffer = Vec::new();
+        let encoder = PNGEncoder::new(&mut buffer);
+    
+        match encoder.encode(&img.to_bytes(), img.dimensions().0, img.dimensions().1, img.color()) {
+            Ok(_) => Ok(buffer),
+            Err(err) => Err(Box::new(err))
+        }
+    }
+}
+
+
 async fn create_sticker(bot: &Bot, path: &str, user_id: UserId) -> Result<InputSticker, Box<dyn Error + Send + Sync>> {
+    debug!("Creating sticker from file: {}", path);
+
     if !Path::new(path).exists() {
         return Err("Sticker file not found".into());
     }
 
-    // Get the file extension
-    let file_extension = Path::new(path)
-        .extension()
-        .and_then(std::ffi::OsStr::to_str)
-        .unwrap_or("Unknown");
+    let image = Img::new(path.to_string())?;
+    let optimized_data = oxipng::optimize_from_memory(&image.encode_png().await?)?;
+    
+    trace!("Optimized data size: {:.2} KB", optimized_data.len() as f64 / 1024.0);
 
-    debug!("File extension: {}", file_extension);
-
-    // Get the file metadata
-    let metadata = fs::metadata(path)?;
-    let file_size_before = metadata.len();
-
-    // Get the image dimensions using imagesize
-    let dimensions_before = match imagesize::size(path) {
-        Ok(size) => size,
-        Err(e) => return Err(Box::new(e)),
-    };
-    debug!("Image dimensions before: {}x{}", dimensions_before.width, dimensions_before.height);
-
-    // Open the image file
-    let image = ImageReader::open(path)?.decode()?;
-
-    let resized = image.resize_exact(MAX_STICKER_SIZE, MAX_STICKER_SIZE, image::imageops::FilterType::Nearest);
-
-    // Convert the image to PNG and store it in a Cursor
-    let mut image_data = Cursor::new(Vec::new());
-    resized.write_to(&mut image_data, image::ImageOutputFormat::Png)?;
-
-    // Get the size and dimensions after converting
-    let file_size_after = image_data.get_ref().len() as u64;
-    let dimensions_after = resized.dimensions();
-    debug!("Image dimensions after: {}x{}", dimensions_after.0, dimensions_after.1);
-
-    // Log the file type, dimensions, and size before and after converting
-    debug!("File size before: {} bytes", file_size_before);
-    debug!("File size after: {} bytes", file_size_after);
-
-    // Create an InputFile from the image data
-    let input_file = InputFile::memory(image_data.into_inner());
-
-    // Upload the sticker file to Telegram
-    let uploaded_file = bot.upload_sticker_file(user_id, input_file).await?;
-
-    // Create an InputSticker from the uploaded file
-    let input_sticker = InputSticker::Png(InputFile::file_id(uploaded_file.id));
+    let input_file    = InputFile::memory(optimized_data);                       // Create an InputFile from the image data
+    let uploaded_file = bot.upload_sticker_file(user_id, input_file).await?;     // Upload the sticker file to Telegram
+    let input_sticker = InputSticker::Png(InputFile::file_id(uploaded_file.id)); // Create an InputSticker from the uploaded file
 
     Ok(input_sticker)
 }
@@ -142,8 +145,14 @@ async fn get_sticker_set_name(bot: &Bot, username: &str, boardname: &str) -> Res
     // Get the current timestamp in milliseconds
     let timestamp = Utc::now().timestamp_millis();
 
-    // Include the timestamp in the sticker set name
-    let sticker_set_name = format!("{}_{}_{}_by_{}", username, boardname, timestamp, botname);
+    // Convert the timestamp to a string
+    let timestamp_str = timestamp.to_string();
+
+    // Get the last three characters of the timestamp string
+    let last_three_digits = &timestamp_str[timestamp_str.len() - 3..];
+
+    // Include the last three digits of the timestamp in the sticker set name
+    let sticker_set_name = format!("{}_{}_{}_by_{}", username, boardname, last_three_digits, botname);
 
     Ok(sticker_set_name)
 }
