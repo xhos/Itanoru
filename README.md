@@ -28,7 +28,7 @@ docker run -d \
   -v itanoru-data:/app/data \
   ghcr.io/xhos/itanoru
 ```
-/help
+
 ### Self compiling
 
 - [gallery-dl](https://github.com/mikf/gallery-dl) available in the environment
