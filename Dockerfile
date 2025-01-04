@@ -1,5 +1,7 @@
 FROM rust:slim
 
+LABEL org.opencontainers.image.source="https://github.com/xhos/Itanoru"
+
 # Install dependencies
 RUN apt-get update && apt-get install -y \
     pkg-config \
