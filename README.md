@@ -21,14 +21,14 @@ There's a version that I host. Or you can host the bot yourself.
 ### Docker
 
 ```bash
-docker run -d `
-  --name itanoru `
-  -e TELOXIDE_TOKEN="YOUR_BOT_TOKEN_HERE" `
-  -e GEMINI_TOKEN="GEMENI_TOKEN_HERE" `
-  -v itanoru-data:/app/data `
+docker run -d \
+  --name itanoru \
+  -e TELOXIDE_TOKEN="YOUR_BOT_TOKEN_HERE" \
+  -e GEMINI_TOKEN="GEMENI_TOKEN_HERE" \
+  -v itanoru-data:/app/data \
   ghcr.io/xhos/itanoru
 ```
-
+/help
 ### Self compiling
 
 - [gallery-dl](https://github.com/mikf/gallery-dl) available in the environment
