@@ -29,7 +29,7 @@ docker run -d \
   ghcr.io/xhos/itanoru
 ```
 
-### Self compiling
+### Compiling
 
 - [gallery-dl](https://github.com/mikf/gallery-dl) available in the environment
 
