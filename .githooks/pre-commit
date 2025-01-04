@@ -1,0 +1,14 @@
+#!/bin/sh
+
+echo "Running cargo fmt check..."
+output=$(cargo fmt -- --check)
+
+if [ $? -eq 0 ]; then
+  echo "Formatting check passed"
+  exit 0
+else
+  echo "Formatting check failed. Running cargo fmt..."
+  cargo fmt
+  echo "Please stage the formatting changes and commit again"
+  exit 1
+fi
