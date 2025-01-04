@@ -1,41 +1,59 @@
-# pinsToStickers ([bot link](https://t.me/pinsToStickers_bot))
+# Itanoru
 
-Just one simple command:
-`/createset <pinterest board url>`
+A bot that creates a Telegram sticker set from a Pinterest board. Also assignes the emojis for stickers using AI, allowing to find the right sticker faster.
 
-# Self-hosting instructions:
+There's a version that I host. Or you can host the bot yourself.
+[link](https://t.me/ItanoruBot)
 
-## Docker image
-
-```
-docker pull #TODO ADD A LINK TO THE IMAGE
-```
-
-## Running locally
-
-1. [Download Rust](http://rustup.rs/).
-2. Create a new bot using [@Botfather](https://t.me/botfather) to get a token in the format `123456789:blablabla`.
-3. Clone the repo
+## Usage
 
 ```bash
-git clone https://github.com/xhos/pinsToStickers.git
+/createset <pinterest board/section link>
 ```
 
-4. Initialise the `TELOXIDE_TOKEN` environmental variable to your token:
+## Self hosting
+
+### Prerequisites
+
+- [Telegram Bot Token](https://t.me/botfather)
+- [Google Gemini API Key](https://aistudio.google.com/app/apikey)
+
+### Docker
 
 ```bash
-# Unix-like
-$ export TELOXIDE_TOKEN=<Your token here>
-
-# Windows command line
-$ set TELOXIDE_TOKEN=<Your token here>
-
-# Windows PowerShell
-$ $env:TELOXIDE_TOKEN=<Your token here>
+docker run -d `
+  --name itanoru `
+  -e TELOXIDE_TOKEN="YOUR_BOT_TOKEN_HERE" `
+  -e GEMINI_TOKEN="GEMENI_TOKEN_HERE" `
+  -v itanoru-data:/app/data `
+  ghcr.io/xhos/itanoru
 ```
 
-5. Run it!
+### Self compiling
+
+- [gallery-dl](https://github.com/mikf/gallery-dl) available in the environment
+
+1. Clone the repository
 
 ```bash
+git clone https://github.com/yourusername/Itanoru.git
+cd Itanoru
+```
+
+2. Configure environment variables
+
+`TELOXIDE_TOKEN="your_telegram_bot_token"`
+`GEMINI_TOKEN="your_gemini_api_key"`
+
+3. Build and run
+
+```bash
+cargo run --release
+```
+
+## Development
+
+```bash
+$env:RUST_LOG="trace"
 cargo run
 ```
