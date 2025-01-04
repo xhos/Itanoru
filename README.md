@@ -42,8 +42,10 @@ cd Itanoru
 
 2. Configure environment variables
 
-`TELOXIDE_TOKEN="your_telegram_bot_token"`
-`GEMINI_TOKEN="your_gemini_api_key"`
+```
+TELOXIDE_TOKEN="your_telegram_bot_token"
+GEMINI_TOKEN="your_gemini_api_key"
+```
 
 3. Build and run
 
