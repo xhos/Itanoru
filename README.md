@@ -2,8 +2,8 @@
 
 A bot that creates a Telegram sticker set from a Pinterest board. Also assignes the emojis for stickers using AI, allowing to find the right sticker faster.
 
-There's a version that I host. Or you can host the bot yourself.
-[link](https://t.me/ItanoruBot)
+There's a version that I host. [link](https://t.me/ItanoruBot)
+Or you can host the bot yourself.
 
 ## Usage
 
